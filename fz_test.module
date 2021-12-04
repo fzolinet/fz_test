@@ -1,0 +1,225 @@
+<?php
+require_once "fz_test_admin.inc";
+
+$fz_queries ='';
+function fz_d($a=NULL){
+  fz_m($a, 3);
+  die();
+}
+
+/**
+ * Die without or with condition
+ * @param unknown $a
+ */
+function fz_die($a=NULL){
+	fz_test($a, true);
+	die();
+}
+/**
+ * Short test function
+ * @param unknown $a
+ */
+function fz_t($a=NULL, $steps =5, $log=false){
+	if($a === 0 ) $a = (int) 0;
+	return fz_test($a, true, $steps, null, $log);
+}
+/**
+ * write out without memory & time
+ * @param unknown $a
+ * @param number $steps
+ */
+function fz_m($a=NULL,$steps = 2){
+  if($a === 0 ) $a = (int) 0;
+  return fz_test($a, true, $steps, false);
+}
+
+function _fz_var_name($dbg){
+  $fn = array("fz_t", "fz_test", "fz_pq", "fz_q", "fz_die", "fz_m");
+	foreach(array_reverse($dbg) AS $i => $d){
+		if( in_array($d["function"], $fn ) )
+		{
+			$lines = file($d["file"]);
+			$line  = $lines[ $d['line'] -1];
+      break;
+		}
+	}
+	preg_match( "#\((.+)[\)\,]#", $line, $match );
+	return print_r($match[1],true);
+}
+/**
+ * Test function
+ * @param string $a
+ * @param string $b
+ * @param string $simple
+ * @param string $steps - How many steps the backtrace
+ */
+function fz_test($a='', $simple=false, $steps = 5, $mem = true, $log=false){
+	static $smpl_time0;
+	
+	$out_back='';
+	if(! (isset($smpl_time0) && $smpl_time0 > 0 ) ){
+		$smpl_time0 = microtime(true);
+	}
+	$out_start ="<pre>";
+	$out = "";
+  $type = gettype($a);
+	if(is_string($a)){
+	  $out .= "(string) ". print_r($a,true)."\n";
+	}elseif(is_numeric($a)){
+	  $out .= "(".$type.") ". print_r($a,true)."\n";
+	}elseif($a === 0 ){
+	  $out .= "(integer) ";
+		$out .= print_r($a, true);
+		$out .= "\n";
+	}elseif($a  === TRUE){
+	  $out .= "(".$type.") True\n";
+	}elseif($a === false ){
+		$out .= print_r($a, true);
+	}elseif(is_object($a) || is_resource($a) || is_array($a)){
+	  $out .= print_r($a, true);
+	}else {
+		$out .= "GET : ";
+		$out .= print_r($_GET, true);
+		$out .= "POST: ";
+		$out .= print_r($_POST, true);
+	}
+  if($mem){
+	  $out .= "\n";
+	  $out .= "<b>Memory      :</b> ".number_format(memory_get_usage(true))." byte\n";
+	  $out .= "<b>Memory peak :</b> ".number_format(memory_get_peak_usage(true))." byte\n";
+    $out .= "<b>Time        :</b> ".fz_timer_read()." s\n";
+  }
+  
+	if(version_compare(PHP_VERSION, "5.4.0")==-1){
+		$dbg  = debug_backtrace();
+		$i = 0;
+		foreach($dbg As $i => $e){
+			if($i< $steps){
+				if( !(isset($e['file']) && preg_match('/fz_test.module/i', $e['file'])) ){
+					$out .= $i.': '.$e['function'].'(), '." ".@($e['file']).' ('.@($e['line']).')'."\n";
+				}
+			}
+		}
+		
+	}else{
+		$dbg  = debug_backtrace(null, $steps);
+		$i = 0;
+		foreach($dbg As $i => $e){
+			if( !(isset($e['file']) && preg_match('/fz_test.module/i', $e['file'])) ){
+				$out .= $i.': '.$e['function'].'(), '." ".@($e['file']).' ('.@($e['line']).')'."\n";
+			}
+		}
+	}
+	$out_back .="</pre>\n";
+	if(!empty($a)) $v_name = "<b>"._fz_var_name($dbg).": </b>";
+	else $v_name = "";
+	$o = $out_start.$v_name.$out.$out_back;
+	
+	if($log){
+	  error_reporting(E_ALL);
+	  error_log($o);
+	  watchdog($o);
+	}
+	if ($simple) print $o;
+	else drupal_set_message($o,true);
+}
+
+/**
+ * Memory testing
+ * @param string $a
+ */
+function fz_mem($a="", $simple=true){
+	$out  = "<pre>Memory     : ".number_format(memory_get_usage(true))." byte\n";
+	$out .= "Memory peak: ".number_format(memory_get_peak_usage(true))." byte\n</pre>";
+	if ($simple) print $out;
+	else drupal_set_message($out);
+};
+
+/**
+ * Time testing - !!!!!!!!!!!!4 Devel modul alapján módosítani kellene
+ * @param string $a
+ */
+function fz_time_start($name='fz_test'){
+	return timer_start($name);
+}
+function fz_timer_read($name='fz_test'){
+	global $timers;
+	if(!isset($timers[$name])) $timers[$name]['time'] = 0;
+	return timer_read($name);
+}
+function fz_timer_stop($name='fz_test'){
+	return timer_stop($name);
+}
+/**
+ * Query testing
+ * @param unknown $q
+ */
+function fz_q($q){
+	global $fz_queries;
+	$sql = fz_pq($q,true);
+	fz_test($sql,null, true);
+	$fz_queries .= $sql."\n";
+	return $fz_queries;
+}
+
+function fz_pq($query, $return = FALSE, $name = NULL) {
+		if (user_access('access devel information')) {
+			if (method_exists($query, 'preExecute')) {
+				$query->preExecute();
+			}
+			$sql = (string) $query;
+			$quoted = array();
+			$connection = Database::getConnection();
+			if( method_exists($query,'arguments')){
+				foreach ((array) $query->arguments() as $key => $val) {
+					$quoted[$key] = $connection->quote($val);
+				}
+			}
+			$sql = strtr($sql, $quoted);
+			if ($return) {
+				return $sql;
+			}
+			dpm($sql, $name);
+		}
+		return ($return ? NULL : $query);
+}
+
+/**
+ * write out the all tested queries
+ * @return string
+ */
+function fz_queries(){
+	global $fz_queries;
+	return $fz_queries;
+}
+
+/**
+ * switch off the xdebug profiling
+ * @param string $profiler
+ */
+function fz_xdebug($profiler="off"){
+  if($profiler=="off")
+    setcookie("XDEBUG_PROFILE","",time()-3600);
+  else{
+    setcookie("XDEBUG_PROFILE","1",time());
+  }
+}
+
+/**
+ * Rebuild The Drupal menu system
+ */
+function fz_rebuild(){
+  menu_rebuild();
+}
+
+function fz_menu_rebuild(){
+  menu_rebuild();
+}
+
+/**
+ * Bootstrap alatt fut le
+ * implementation of hook_init()
+ */
+function fz_menu_boot(){
+  
+}

@@ -1,0 +1,13 @@
+; $Id:
+name = "FZ Test module"
+description = "Provides integration of Develand PGP module for development"
+package = FZ
+core = 7.x
+files[] = fz_test.module
+dependencies[] = devel
+
+; Information added by drupal.org packaging script on 2013-10-01
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "fz_test"
+datestamp = "1407353057"
